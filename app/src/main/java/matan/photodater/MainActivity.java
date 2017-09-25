@@ -54,15 +54,13 @@ public class MainActivity extends AppCompatActivity {
 
     private Runnable onPermissionResult;
 
-    private Button browseImagesButton;
-
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
         setContentView(R.layout.activity_main);
 
-        browseImagesButton = (Button) findViewById(R.id.browseImagesButton);
+        Button browseImagesButton = (Button) findViewById(R.id.browseImagesButton);
         browseImagesButton.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) {
                 getExternalStoragePermissions(new Runnable() {
@@ -187,6 +185,7 @@ public class MainActivity extends AppCompatActivity {
             ExifInterface exif = new ExifInterface(imagePath);
             System.out.println(exif.getAttribute(ExifInterface.TAG_DATETIME));
             if (date != null) {
+                System.out.println("UPDATEEEEE: " + imagePath + " " + date);
                 exif.setAttribute(ExifInterface.TAG_DATETIME, date);
                 exif.saveAttributes();
             }
@@ -280,15 +279,6 @@ public class MainActivity extends AppCompatActivity {
         System.out.println("Is writeable: " + isExternalStorageWritable());
     }
 
-    private void printImagePaths(String directoryPath) {
-        File directoryFile = new File(directoryPath);
-        System.out.println("Is directory: " + directoryFile.isDirectory());
-        File[] imagesFiles = directoryFile.listFiles();
-        for (File imageFile : imagesFiles) {
-            System.out.println(imageFile.getName());
-        }
-    }
-
 
     /* Checks if external storage is available for read and write */
     public boolean isExternalStorageWritable() {
@@ -309,76 +299,4 @@ public class MainActivity extends AppCompatActivity {
         return false;
     }
 
-    /* returns external storage paths (directory of external memory card) as array of Strings */
-    public String[] getExternalStorageDirectories() {
-
-        List<String> results = new ArrayList<>();
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) { //Method 1 for KitKat & above
-            File[] externalDirs = getExternalFilesDirs(null);
-
-            for (File file : externalDirs) {
-                String path = file.getPath().split("/Android")[0];
-
-                boolean addPath = false;
-
-                if(Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-                    addPath = Environment.isExternalStorageRemovable(file);
-                }
-                else{
-                    addPath = Environment.MEDIA_MOUNTED.equals(EnvironmentCompat.getStorageState(file));
-                }
-
-                if(addPath){
-                    results.add(path);
-                }
-            }
-        }
-
-        if(results.isEmpty()) { //Method 2 for all versions
-            // better variation of: http://stackoverflow.com/a/40123073/5002496
-            String output = "";
-            try {
-                final Process process = new ProcessBuilder().command("mount | grep /dev/block/vold")
-                        .redirectErrorStream(true).start();
-                process.waitFor();
-                final InputStream is = process.getInputStream();
-                final byte[] buffer = new byte[1024];
-                while (is.read(buffer) != -1) {
-                    output = output + new String(buffer);
-                }
-                is.close();
-            } catch (final Exception e) {
-                e.printStackTrace();
-            }
-            if(!output.trim().isEmpty()) {
-                String devicePoints[] = output.split("\n");
-                for(String voldPoint: devicePoints) {
-                    results.add(voldPoint.split(" ")[2]);
-                }
-            }
-        }
-
-        //Below few lines is to remove paths which may not be external memory card, like OTG (feel free to comment them out)
-        if(Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            for (int i = 0; i < results.size(); i++) {
-                if (!results.get(i).toLowerCase().matches(".*[0-9a-f]{4}[-][0-9a-f]{4}")) {
-                    Log.d(LOG_TAG, results.get(i) + " might not be extSDcard");
-                    results.remove(i--);
-                }
-            }
-        } else {
-            for (int i = 0; i < results.size(); i++) {
-                if (!results.get(i).toLowerCase().contains("ext") && !results.get(i).toLowerCase().contains("sdcard")) {
-                    Log.d(LOG_TAG, results.get(i)+" might not be extSDcard");
-                    results.remove(i--);
-                }
-            }
-        }
-
-        String[] storageDirectories = new String[results.size()];
-        for(int i=0; i<results.size(); ++i) storageDirectories[i] = results.get(i);
-
-        return storageDirectories;
-    }
 }
