@@ -143,16 +143,24 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void updateImages(List<String> imagesPaths) {
+        // This can clearly be done using one iteration, but it seems redundant optimization since
+        // it is indeed possible that we would like to show some feedback such as promting the user
+        // with the number of images found and asking for permission to continue.
         Map<String, String> pathsToDates = setupPathsToDates(imagesPaths);
         for (Map.Entry<String, String> pathToDate : pathsToDates.entrySet()) {
-
+            updateExif(pathToDate.getKey(), pathToDate.getValue());
         }
     }
 
     private Map<String,String> setupPathsToDates(List<String> imagesPaths) {
         Map<String, String> pathToDate = new HashMap<>();
         for (String imagePath : imagesPaths) {
-            String date = formatDate(imagePath);
+            File imageFile = new File(imagePath);
+            if (!imageFile.isFile()) {
+                continue;
+            }
+            String imageFilename = imageFile.getName();
+            String date = formatDate(imageFilename);
             if (date != null) {
                 pathToDate.put(imagePath, date);
             }
@@ -174,38 +182,20 @@ public class MainActivity extends AppCompatActivity {
         return result;
     }
 
-    private void accessGranted() {
-        File picturesDirectory = new File(Environment.getExternalStoragePublicDirectory(
-                Environment.DIRECTORY_DCIM).getAbsolutePath() + "/Camera");
-        if (!picturesDirectory.isDirectory()) {
-            System.out.println("The pictures directory is somehow not a directory!");
-            return;
-        }
-        File[] images = picturesDirectory.listFiles();
-        if (images == null) {
-            System.out.println("The pictures directory cannot be accessed properly");
-            return;
-        }
-        ContentResolver contentResolver = this.getContentResolver();
-        for (File image : images) {
-            System.out.println(image.getName());
-            try {
-                ExifInterface exif = new ExifInterface(image.getAbsolutePath());
-                System.out.println(exif.getAttribute(ExifInterface.TAG_DATETIME));
-                String formattedDate = formatDate(image.getName());
-                if (formattedDate != null) {
-                    exif.setAttribute(ExifInterface.TAG_DATETIME, formattedDate);
-                    exif.saveAttributes();
-                }
-            } catch (IOException e) {
-                e.printStackTrace();
+    private void updateExif(String imagePath, String date) {
+        try {
+            ExifInterface exif = new ExifInterface(imagePath);
+            System.out.println(exif.getAttribute(ExifInterface.TAG_DATETIME));
+            if (date != null) {
+                exif.setAttribute(ExifInterface.TAG_DATETIME, date);
+                exif.saveAttributes();
             }
-
+        } catch (IOException e) {
+            e.printStackTrace();
         }
-    }
+}
 
     private String formatDate(String filename) {
-
         String[] fileAndExtension = filename.split("\\.");
         if (fileAndExtension.length != 2) {
             System.out.println("Could not separate filename and extension for: " + filename);
