@@ -1,43 +1,37 @@
 package matan.photodater;
 
 import android.Manifest;
+import android.app.DialogFragment;
+import android.app.Fragment;
+import android.app.FragmentTransaction;
 import android.content.ClipData;
-import android.content.ContentResolver;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.database.Cursor;
 import android.provider.MediaStore;
 import android.support.media.ExifInterface;
 import android.net.Uri;
-import android.os.Build;
 import android.os.Environment;
 import android.support.v4.app.ActivityCompat;
 import android.support.v4.content.ContextCompat;
-import android.support.v4.os.EnvironmentCompat;
 import android.support.v7.app.AppCompatActivity;
 import android.os.Bundle;
-import android.telecom.Call;
 import android.text.TextUtils;
-import android.util.Log;
 import android.util.Pair;
 import android.view.View;
 import android.widget.Button;
+import android.widget.FrameLayout;
 import android.widget.Toast;
 
 import java.io.File;
 import java.io.IOException;
-import java.io.InputStream;
 import java.util.ArrayList;
+import java.util.Calendar;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-public class MainActivity extends AppCompatActivity {
-
-    public interface SilentCallback<T> {
-
-        void call(T obj);
-    }
+public class MainActivity extends AppCompatActivity implements AlertDialogFragment.AlertableActivity {
 
     private static final String LOG_TAG = "MAIN";
 
@@ -53,6 +47,8 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private Runnable onPermissionResult;
+
+    private DialogCallback dialogCallback;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -73,10 +69,38 @@ public class MainActivity extends AppCompatActivity {
         });
     }
 
+    private void showDialog(int photosChosen, int photosParsed, DialogCallback dialogCallback) {
+        this.dialogCallback = dialogCallback;
+        DialogFragment newFragment = AlertDialogFragment.newInstance(formatDialogMessage(photosChosen, photosParsed));
+        newFragment.show(getFragmentManager(), "dialog");
+    }
+
+    private String formatDialogMessage(int photosChosen, int photosParsed) {
+        return String.format("%d photos chosen, out of which %d had a recognizable name format. Update?",
+                photosChosen, photosParsed);
+    }
+
+    @Override
+    public void doPositiveClick() {
+        if (dialogCallback != null) {
+            dialogCallback.dialogConfirmed();
+        }
+        dialogCallback = null;
+    }
+
+    @Override
+    public void doNegativeClick() {
+        if (dialogCallback != null) {
+            dialogCallback.dialogCancelled();
+        }
+        dialogCallback = null;
+    }
+
     private void getExternalStoragePermissions(Runnable afterCallback) {
         printExternalStorageStatus();
         if (isPermittedToReadExternalStorage()) {
             afterCallback.run();
+            return;
         }
         onPermissionResult = afterCallback;
         askForPermissionToReadExternalStorage();
@@ -105,11 +129,11 @@ public class MainActivity extends AppCompatActivity {
 
     private Pair<ActivityIdentifier, CallbackCode> unpackCode(int code) throws IllegalArgumentException {
         int activityIdentifierOrdinal = code / MAX_CALLBACK_CODES;
-        if (ActivityIdentifier.values().length >= activityIdentifierOrdinal) {
+        if (ActivityIdentifier.values().length <= activityIdentifierOrdinal) {
             throw new IllegalArgumentException();
         }
         int callbackCodeOrdinal = code % MAX_CALLBACK_CODES;
-        if (CallbackCode.values().length >= callbackCodeOrdinal) {
+        if (CallbackCode.values().length <= callbackCodeOrdinal) {
             throw new IllegalArgumentException();
         }
         return new Pair<>(ActivityIdentifier.values()[activityIdentifierOrdinal],
@@ -144,10 +168,22 @@ public class MainActivity extends AppCompatActivity {
         // This can clearly be done using one iteration, but it seems redundant optimization since
         // it is indeed possible that we would like to show some feedback such as promting the user
         // with the number of images found and asking for permission to continue.
-        Map<String, String> pathsToDates = setupPathsToDates(imagesPaths);
-        for (Map.Entry<String, String> pathToDate : pathsToDates.entrySet()) {
-            updateExif(pathToDate.getKey(), pathToDate.getValue());
-        }
+        final Map<String, String> pathsToDates = setupPathsToDates(imagesPaths);
+
+        showDialog(imagesPaths.size(), pathsToDates.size(), new DialogCallback() {
+            @Override
+            public void dialogConfirmed() {
+                for (Map.Entry<String, String> pathToDate : pathsToDates.entrySet()) {
+                    updateExif(pathToDate.getKey(), pathToDate.getValue());
+                }
+            }
+
+            @Override
+            public void dialogCancelled() {
+
+            }
+        });
+
     }
 
     private Map<String,String> setupPathsToDates(List<String> imagesPaths) {
@@ -158,7 +194,7 @@ public class MainActivity extends AppCompatActivity {
                 continue;
             }
             String imageFilename = imageFile.getName();
-            String date = formatDate(imageFilename);
+            String date = parseDate(imageFilename);
             if (date != null) {
                 pathToDate.put(imagePath, date);
             }
@@ -194,45 +230,47 @@ public class MainActivity extends AppCompatActivity {
         }
 }
 
-    private String formatDate(String filename) {
+    private String parseDate(String filename) {
         String[] fileAndExtension = filename.split("\\.");
         if (fileAndExtension.length != 2) {
             System.out.println("Could not separate filename and extension for: " + filename);
             return null;
         }
         String withoutExtension = fileAndExtension[0];
-        String[] nameComponents = withoutExtension.split("_");
+        if (withoutExtension.startsWith("IMG")) {
+            return dateForIMGFormat(withoutExtension);
+        } else {
+            return null;
+        }
+    }
+
+    private String dateForIMGFormat(String filename) {
+        String[] nameComponents = filename.split("_");
         if (nameComponents.length != 3) {
             System.out.println("Expected three components in filename: " + filename);
             return null;
         }
-        if (!nameComponents[0].equals("IMG")) {
-            System.out.println("Expected first component to be IMG in filename: " + filename);
-            return null;
-        }
         String date = nameComponents[1];
-        if (date.length() != 8) {
-            System.out.println("Expected date to have 8 digits in filename: " + filename);
+
+        StringDate stringDate = StringDate.StringDateFactory.createStringDate(date);
+        if (stringDate == null) {
             return null;
         }
-        try {  Integer.valueOf(date); }
-        catch (NumberFormatException e) {
-            System.out.println("Expected date to contain digits in filename: " + filename);
-            return null;
-        }
+
         String time = nameComponents[2];
-        if (time.length() != 6) {
-            System.out.println("Expected time to have 6 digits in filename: " + filename);
+        StringTime stringTime = StringTime.StringTimeFactory.createStringTime(time);
+        if (stringTime == null) {
             return null;
         }
-        try {  Integer.valueOf(time); }
-        catch (NumberFormatException e) {
-            System.out.println("Expected time to contain digits in filename: " + filename);
-            return null;
-        }
-        String[] dateTokens = new String[] { date.substring(0, 4), date.substring(4, 6), date.substring(6, 8)} ;
+
+        return formatDateTime(stringDate, stringTime);
+    }
+
+    private String formatDateTime(StringDate date, StringTime time) {
+        String[] dateTokens = new String[] {date.getYear(), date.getMonth(), date.getDay()};
         String formattedDate = TextUtils.join(":", dateTokens);
-        String[] timeTokens = new String[] { time.substring(0,2), time.substring(2 ,4), time.substring(4 ,6)} ;
+
+        String[] timeTokens = new String[] {time.getHour(), time.getMinute(), time.getSecond()};
         String formattedTime = TextUtils.join(":", timeTokens);
         return TextUtils.join(" ", new String[] {formattedDate, formattedTime});
     }
